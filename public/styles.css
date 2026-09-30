@@ -8,3 +8,31 @@
 /* Project documentation */
 .doc-top{display:flex;justify-content:space-between;gap:20px;align-items:center}.doc-top p{max-width:580px}.doc-pages{display:grid;gap:12px;margin-top:28px}.doc-page{border:1px solid var(--border);border-radius:12px}.doc-open{width:100%;text-align:left;padding:22px;display:flex;flex-direction:column;align-items:flex-start;gap:8px}.doc-open small{color:var(--muted)}.doc-title{font-size:2rem!important;font-weight:600;width:100%;border:0!important;background:transparent!important;margin-bottom:12px}.doc-block{margin:18px 0;padding:8px 0;border-bottom:1px solid var(--border)}.doc-block-tools{display:flex;justify-content:space-between;opacity:.75;margin-bottom:8px}.doc-block-tools select{max-width:160px;font-size:.8rem}.doc-move{display:flex}.doc-input-row{display:flex;gap:12px;align-items:flex-start}.doc-text{width:100%;min-height:78px;resize:vertical;border:0!important;background:transparent!important;line-height:1.65}.doc-h1{font-size:1.7rem!important;font-weight:600}.doc-h2{font-size:1.3rem!important;font-weight:600}.doc-quote{border-left:3px solid #adacff!important;padding-left:16px!important;font-style:italic}.doc-code{font-family:monospace!important;background:rgba(120,120,150,.1)!important}.doc-add{display:flex;flex-wrap:wrap;gap:5px;margin:20px 0}.doc-input-row input[type=checkbox]{margin-top:18px}.doc-block input[type=url]{width:100%}#modal:has(#doc-form){width:min(850px,94vw);max-width:850px}#doc-save-status{font-size:.8rem}@media(max-width:600px){.doc-top{align-items:flex-start;flex-direction:column}.doc-title{font-size:1.5rem!important}}
 
+
+
+/* Compact project ticket editor */
+#modal:has(#task-form){width:min(920px,calc(100vw - 20px));max-height:calc(100dvh - 24px)}
+#modal:has(#task-form) .modal-head{padding:13px 18px}
+#modal:has(#task-form) .modal-body{padding:12px 18px 14px}
+#task-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 12px}
+#task-form>label.field:first-of-type{grid-column:1;min-width:0;margin-bottom:8px}
+#task-form>label.field:nth-of-type(2){grid-column:2;min-width:0;margin-bottom:8px}
+#task-form>.form-grid,#task-form>.check-row,#task-form>.form-error,#task-form>.modal-footer{grid-column:1/-1}
+#task-form>.form-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px 10px;margin:0}
+#task-form .field{gap:4px;margin-bottom:6px;min-width:0}
+#task-form .field>span{font-size:.75rem;line-height:1.2}
+#task-form input:not([type=checkbox]),#task-form select,#task-form textarea{min-height:35px;padding:6px 9px;font-size:.84rem}
+#task-form textarea{height:54px;min-height:54px;max-height:72px;line-height:1.35;resize:vertical}
+#task-form .form-grid select[multiple]{height:64px;min-height:64px;padding:3px 8px}
+#task-form .field small{font-size:.69rem;line-height:1.25}
+#task-form .check-row{font-size:.76rem;line-height:1.25;gap:8px;margin:5px 0}
+#task-form .form-error{font-size:.8rem;line-height:1.2;margin:0;min-height:0}
+#task-form .modal-footer{padding-top:8px;margin-top:4px}
+#task-form .modal-footer button{min-height:36px;padding:8px 12px}
+@media(max-width:600px){
+  #modal:has(#task-form){width:calc(100vw - 16px);max-height:calc(100dvh - 16px)}
+  #modal:has(#task-form) .modal-head{padding:12px 14px}
+  #modal:has(#task-form) .modal-body{padding:10px 14px 12px}
+  #task-form>label.field:first-of-type,#task-form>label.field:nth-of-type(2){grid-column:1/-1}
+  #task-form>.form-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 8px}
+}
