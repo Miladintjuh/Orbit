@@ -25,7 +25,7 @@ export default async function handler(req,res){
     const upstream=await fetch(target,{method:req.method,headers,body:await requestBody(req),redirect:'manual'});
     res.statusCode=upstream.status;
     const cookies=typeof upstream.headers.getSetCookie==='function'?upstream.headers.getSetCookie():[];
-    if(cookies.length)res.setHeader('Set-Cookie',cookies);
+    if(cookies.length)res.setHeader('Set-Cookie',cookies.map(cookie=>cookie.replace(/;\s*domain=[^;]*/i,'')));
     for(const [key,value] of upstream.headers){
       if(['connection','content-encoding','content-length','set-cookie','transfer-encoding'].includes(key))continue;
       res.setHeader(key,value);
