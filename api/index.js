@@ -1,5 +1,5 @@
 const upstreamOrigin='https://orbit-focus-workspace-e6d4mnxpc-mjeremic-9407.vercel.app';
-const forwardHeaders=['authorization','content-type','cookie','if-none-match','user-agent'];
+const forwardHeaders=['authorization','content-type','cookie','if-none-match','origin','referer','user-agent'];
 
 async function requestBody(req){
   if(['GET','HEAD'].includes(req.method||'GET'))return undefined;
