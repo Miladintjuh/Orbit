@@ -66,23 +66,258 @@ async function saveDoc(){if(!docDraft.title.trim())throw new Error('Give your pa
 /* Rich project documents — an autosaving, member-scoped document surface. */
 const richStyle=document.createElement('link');richStyle.rel='stylesheet';richStyle.href='/rich-docs.css';document.head.append(richStyle);
 const orbitBaseRender=render,orbitBaseLoadCloud=loadCloud;
-let richDoc=null,richDirty=false,richSaveTimer=null,richSaveInFlight=false;
+let richDoc=null,richDirty=false,richSaveTimer=null,richSaveInFlight=false,richSavePromise=null,richEditVersion=0;let richCollapsedTabs=new Set(),richCollapsedHeadings=new Set();
 const richTags=new Set(['P','DIV','BR','H1','H2','H3','H4','UL','OL','LI','BLOCKQUOTE','STRONG','B','EM','I','U','S','DEL','CODE','PRE','A','SPAN','FONT']);
-const richFormats=[['P','Paragraph'],['H1','Title'],['H2','Heading'],['H3','Subheading'],['BLOCKQUOTE','Quote'],['PRE','Code']];
+const richFormats=[['P','Paragraph'],['H1','Title'],['H2','Heading'],['H3','Subheading'],['H4','Small heading'],['BLOCKQUOTE','Quote'],['PRE','Code']];
 function richText(value=''){return esc(value).replace(/\r?\n/g,'<br>');}
 function richInitialHtml(doc){const value=doc?.html??doc?.blocks?.[0]?.text??'';if(!value)return '<p><br></p>';return /<\/?[a-z][\s\S]*>/i.test(value)?richSanitize(value):'<p>'+richText(value)+'</p>';}
 function richSanitize(value=''){const holder=document.createElement('template');holder.innerHTML=String(value);for(const node of [...holder.content.querySelectorAll('*')]){if(!richTags.has(node.tagName)){node.replaceWith(document.createTextNode(node.textContent||''));continue;}for(const attr of [...node.attributes]){const name=attr.name.toLowerCase();if(name==='href'&&node.tagName==='A'){try{const url=new URL(attr.value,location.origin);if(!['http:','https:','mailto:'].includes(url.protocol))node.removeAttribute(attr.name);else{node.setAttribute('href',url.href);node.setAttribute('rel','noopener noreferrer');node.setAttribute('target','_blank');}}catch{node.removeAttribute(attr.name);}continue;}if(name==='color'&&node.tagName==='FONT'&&/^#[0-9a-f]{3,8}$/i.test(attr.value))continue;if(name==='style'&&node.tagName==='SPAN'&&/^(color|background-color):\s*(#[0-9a-f]{3,8}|rgb\([^)]{1,30}\));?$/i.test(attr.value))continue;if(name==='class'&&node.tagName==='UL'&&attr.value==='rich-checklist')continue;if(name==='data-checklist'&&node.tagName==='UL'&&attr.value==='true')continue;node.removeAttribute(attr.name);}}return holder.innerHTML.slice(0,19000)||'<p><br></p>';}
 function richProject(){return richDoc&&project(richDoc.projectId);}
 function richSetStatus(message,kind=''){const el=$('#rich-doc-status');if(el){el.textContent=message;el.dataset.kind=kind;}}
-function richCurrentContent(){const editor=$('#rich-doc-canvas');return richSanitize(editor?editor.innerHTML:richDoc?.html||'');}
-function mountModernDocs(){const main=$('#main'),p=project();if(!main||!p)return;if(!richDoc){main.innerHTML=header(esc(p.data.name),'Project documentation is shared with this project’s members.',button('← Board','open-project','small',`data-id="${p.id}"`))+`<section class="docs-home"><div class="docs-home-head"><div><span class="eyebrow">PROJECT DOCUMENTS</span><h2>Write the context once.</h2><p>Plans, decisions, meeting notes, and hand-offs stay with the project.</p></div>${button(icon('plus')+'New document','doc-new','primary')}</div><div class="rich-doc-grid">${(p.data.docs||[]).slice().sort((a,b)=>String(b.updatedAt||'').localeCompare(String(a.updatedAt||''))).map(d=>`<button class="rich-doc-card" type="button" data-action="doc-open" data-id="${esc(d.id)}"><span class="rich-doc-card-icon">▤</span><span><strong>${esc(d.title||'Untitled document')}</strong><small>Edited ${esc(d.updatedAt?new Date(d.updatedAt).toLocaleDateString():'just now')}</small></span><span class="rich-doc-arrow">→</span></button>`).join('')||`<div class="rich-doc-empty"><div class="rich-doc-empty-mark">✦</div><h3>No documents yet</h3><p>Create a shared project brief, a meeting note, or the next decision log.</p>${button('Create the first document','doc-new','primary')}</div>`}</div></section>`;return;}const doc=richDoc;main.innerHTML=`<section class="rich-editor-shell"><header class="rich-editor-header"><button type="button" class="rich-back" data-action="doc-back" aria-label="Back to project documents">← <span>All documents</span></button><div class="rich-editor-sharing"><span class="rich-live-dot"></span><span>Shared with project members</span></div><div class="rich-editor-actions"><span id="rich-doc-status" role="status">Saved</span>${button('Save','rich-save','primary small')}</div></header><div class="rich-editor-toolbar" role="toolbar" aria-label="Text formatting"><select id="rich-block-format" aria-label="Text style">${richFormats.map(([tag,label])=>`<option value="${tag}">${label}</option>`).join('')}</select><span class="rich-tool-separator"></span><button type="button" data-rich-command="bold" title="Bold (Ctrl+B)" aria-label="Bold"><b>B</b></button><button type="button" data-rich-command="italic" title="Italic (Ctrl+I)" aria-label="Italic"><i>I</i></button><button type="button" data-rich-command="underline" title="Underline (Ctrl+U)" aria-label="Underline"><u>U</u></button><button type="button" data-rich-command="strikeThrough" title="Strikethrough" aria-label="Strikethrough"><s>S</s></button><span class="rich-tool-separator"></span><button type="button" data-rich-command="insertUnorderedList" title="Bulleted list" aria-label="Bulleted list">☷</button><button type="button" data-rich-command="insertOrderedList" title="Numbered list" aria-label="Numbered list">☰</button><button type="button" data-rich-command="checklist" title="Checklist" aria-label="Checklist">☑</button><span class="rich-tool-separator"></span><button type="button" data-rich-command="createLink" title="Add link" aria-label="Add link">↗</button><input id="rich-colour" type="color" value="#adacff" aria-label="Text colour"><button type="button" data-rich-command="removeFormat" title="Clear formatting" aria-label="Clear formatting">Tx</button></div><div class="rich-editor-canvas-wrap"><article class="rich-paper"><input id="rich-doc-title" class="rich-doc-title" maxlength="120" aria-label="Document title" placeholder="Untitled document" value="${esc(doc.title)}"><div id="rich-doc-canvas" class="rich-doc-canvas" contenteditable="true" spellcheck="true" role="textbox" aria-multiline="true" aria-label="Document content">${richInitialHtml(doc)}</div><footer class="rich-paper-footer"><span>Project document</span><span>Autosaves while you write</span></footer></article></div></section>`;richSetStatus(richDirty?'Unsaved changes':'Saved');}
+function richCurrentContent(){const editor=$('#rich-doc-canvas');return richSanitize(editor?editor.innerHTML:richActiveTab()?.html||richDoc?.html||'');}
+function richTabsFrom(doc){
+  if(Array.isArray(doc?.tabs)&&doc.tabs.length)return doc.tabs.slice(0,20).map((tab,index)=>({id:String(tab?.id||uid()),title:String(tab?.title||('Tab '+(index+1))).trim().slice(0,80),html:richInitialHtml({html:tab?.html??tab?.blocks?.[0]?.text??''})}));
+  return [{id:uid(),title:'Tab 1',html:richInitialHtml(doc)}];
+}
+function richActiveTab(){return richDoc?.tabs?.find(tab=>tab.id===richDoc.activeTabId)||richDoc?.tabs?.[0]||null;}
+function richRememberTab(){if(!richDoc)return;try{localStorage.setItem(richTabPreferenceKey(richDoc.projectId,richDoc.id),richDoc.activeTabId||'');}catch{}}
+function richSyncActiveTab(){const tab=richActiveTab();if(tab)tab.html=richCurrentContent();}
+function richOutlineNodes(tab){
+  const source=document.createElement('template');
+  source.innerHTML=richSanitize(tab?.html||'');
+  const roots=[],stack=[];
+  [...source.content.querySelectorAll('h1,h2,h3,h4')].forEach((heading,index)=>{
+    const node={index,level:Number(heading.tagName.slice(1)),title:heading.textContent.trim()||'Untitled heading',children:[]};
+    while(stack.length&&stack[stack.length-1].level>=node.level)stack.pop();
+    const parent=stack[stack.length-1];
+    (parent?parent.children:roots).push(node);
+    stack.push(node);
+  });
+  return roots;
+}
+function richOutlineItemMarkup(node,tabId){
+  const hasChildren=node.children.length>0,key=tabId+':'+node.index,collapsed=richCollapsedHeadings.has(key);
+  const toggle=hasChildren?'<button type="button" class="rich-outline-toggle" data-action="doc-outline-toggle" data-tab-id="'+esc(tabId)+'" data-heading-index="'+node.index+'" aria-label="'+(collapsed?'Expand':'Collapse')+' heading '+esc(node.title)+'" aria-expanded="'+(!collapsed)+'">'+(collapsed?'▸':'▾')+'</button>':'<span class="rich-outline-spacer"></span>';
+  const nested=hasChildren?'<ul class="rich-outline-tree" '+(collapsed?'hidden':'')+'>'+node.children.map(child=>richOutlineItemMarkup(child,tabId)).join('')+'</ul>':'';
+  return '<li class="rich-outline-item"><div class="rich-outline-row">'+toggle+'<button type="button" class="rich-outline-link" data-action="doc-outline-jump" data-tab-id="'+esc(tabId)+'" data-heading-index="'+node.index+'" title="'+esc(node.title)+'">'+esc(node.title)+'</button></div>'+nested+'</li>';
+}
+function richTabListMarkup(){
+  if(!richDoc)return '';
+  return richDoc.tabs.map(tab=>{
+    const active=tab.id===richDoc.activeTabId,headings=richOutlineNodes(tab),collapsed=richCollapsedTabs.has(tab.id);
+    const select='<button type="button" class="rich-tab-select'+(active?' is-active':'')+'" data-action="doc-tab-select" data-id="'+esc(tab.id)+'" aria-pressed="'+active+'" title="'+esc(tab.title)+'"><span class="rich-tab-icon">▤</span><span class="rich-tab-name">'+esc(tab.title)+'</span></button>';
+    const disclosure=headings.length?'<button type="button" class="rich-tab-disclosure" data-action="doc-tab-outline-toggle" data-id="'+esc(tab.id)+'" aria-label="'+(collapsed?'Expand':'Collapse')+' headings in '+esc(tab.title)+'" aria-expanded="'+(!collapsed)+'">'+(collapsed?'▸':'▾')+'</button>':'<span class="rich-tab-disclosure-placeholder"></span>';
+    const actions='<div class="rich-tab-actions"><button type="button" data-action="doc-tab-rename" data-id="'+esc(tab.id)+'" aria-label="Rename '+esc(tab.title)+'" title="Rename tab">···</button><button type="button" data-action="doc-tab-delete" data-id="'+esc(tab.id)+'" aria-label="Delete '+esc(tab.title)+'" title="Delete tab">×</button></div>';
+    const outline=headings.length?'<ul class="rich-outline-tree rich-tab-outline" '+(collapsed?'hidden':'')+'>'+headings.map(node=>richOutlineItemMarkup(node,tab.id)).join('')+'</ul>':(active?'<p class="rich-outline-empty">Use a heading style to create an outline here.</p>':'');
+    return '<li class="rich-tab-group"><div class="rich-tab-row">'+disclosure+select+actions+'</div>'+outline+'</li>';
+  }).join('');
+}
+function richRefreshTabList(){const list=$('#rich-doc-tab-list');if(list)list.innerHTML=richTabListMarkup();}
+function mountModernDocs(){
+  const main=$('#main'),p=project();
+  if(!main||!p)return;
+  if(!richDoc){
+    const docs=(p.data.docs||[]).slice().sort((a,b)=>String(b.updatedAt||'').localeCompare(String(a.updatedAt||'')));
+    main.innerHTML=header(esc(p.data.name),'Project documentation is shared with this project’s members.',button('← Board','open-project','small','data-id="'+p.id+'"'))+
+      '<section class="docs-home"><div class="docs-home-head"><div><span class="eyebrow">PROJECT DOCUMENTS</span><h2>Write the context once.</h2><p>Plans, decisions, meeting notes, and hand-offs stay with the project.</p></div>'+button(icon('plus')+'New document','doc-new','primary')+'</div><div class="rich-doc-grid">'+
+      (docs.map(d=>'<button class="rich-doc-card" type="button" data-action="doc-open" data-id="'+esc(d.id)+'"><span class="rich-doc-card-icon">▤</span><span><strong>'+esc(d.title||'Untitled document')+'</strong><small>Edited '+esc(d.updatedAt?new Date(d.updatedAt).toLocaleDateString():'just now')+'</small></span><span class="rich-doc-arrow">→</span></button>').join('')||
+      '<div class="rich-doc-empty"><div class="rich-doc-empty-mark">✦</div><h3>No documents yet</h3><p>Create a shared project brief, a meeting note, or the next decision log.</p>'+button('Create the first document','doc-new','primary')+'</div>')+
+      '</div></section>';
+    return;
+  }
+  const doc=richDoc,tab=richActiveTab();
+  if(!tab)return;
+  const formatOptions=richFormats.map(([tag,label])=>'<option value="'+tag+'">'+esc(label)+'</option>').join('');
+  const toolbar='<div class="rich-editor-toolbar" role="toolbar" aria-label="Text formatting"><select id="rich-block-format" aria-label="Text style">'+formatOptions+'</select><span class="rich-tool-separator"></span><button type="button" data-rich-command="bold" title="Bold (Ctrl+B)" aria-label="Bold"><b>B</b></button><button type="button" data-rich-command="italic" title="Italic (Ctrl+I)" aria-label="Italic"><i>I</i></button><button type="button" data-rich-command="underline" title="Underline (Ctrl+U)" aria-label="Underline"><u>U</u></button><button type="button" data-rich-command="strikeThrough" title="Strikethrough" aria-label="Strikethrough"><s>S</s></button><span class="rich-tool-separator"></span><button type="button" data-rich-command="insertUnorderedList" title="Bulleted list" aria-label="Bulleted list">☷</button><button type="button" data-rich-command="insertOrderedList" title="Numbered list" aria-label="Numbered list">☰</button><button type="button" data-rich-command="checklist" title="Checklist" aria-label="Checklist">☑</button><span class="rich-tool-separator"></span><button type="button" data-rich-command="createLink" title="Add link" aria-label="Add link">↗</button><input id="rich-colour" type="color" value="#adacff" aria-label="Text colour"><button type="button" data-rich-command="removeFormat" title="Clear formatting" aria-label="Clear formatting">Tx</button></div>';
+  const sidebar='<aside class="rich-doc-sidebar" aria-label="Document tabs and headings"><div class="rich-doc-sidebar-head"><h2>Document tabs</h2>'+button(icon('plus'),'doc-tab-add','rich-tab-add','aria-label="Add tab" title="Add tab"')+'</div><p class="rich-doc-sidebar-hint">Tabs and their headings</p><ol id="rich-doc-tab-list" class="rich-tab-list">'+richTabListMarkup()+'</ol></aside>';
+  const editor='<div class="rich-editor-canvas-wrap"><article class="rich-paper"><input id="rich-doc-title" class="rich-doc-title" maxlength="120" aria-label="Document title" placeholder="Untitled document" value="'+esc(doc.title)+'"><div id="rich-doc-canvas" class="rich-doc-canvas" contenteditable="true" spellcheck="true" role="textbox" aria-multiline="true" aria-label="Document content: '+esc(tab.title)+'">'+richInitialHtml({html:tab.html})+'</div><footer class="rich-paper-footer"><span>'+esc(tab.title)+'</span><span>Autosaves while you write</span></footer></article></div>';
+  main.innerHTML='<section class="rich-editor-shell"><header class="rich-editor-header"><button type="button" class="rich-back" data-action="doc-back" aria-label="Back to project documents">← <span>All documents</span></button><div class="rich-editor-sharing"><span class="rich-live-dot"></span><span>Shared with project members</span></div><div class="rich-editor-actions"><span id="rich-doc-status" role="status">Saved</span>'+button('Save','rich-save','primary small')+'</div></header>'+toolbar+'<div class="rich-editor-body">'+sidebar+editor+'</div></section>';
+  richSetStatus(richDirty?'Unsaved changes':'Saved');
+}
 render=function(){orbitBaseRender();if(state.view==='docs')mountModernDocs();};
-loadCloud=async function(renderAfter=true){const editing=state.view==='docs'&&richDoc;await orbitBaseLoadCloud(false);if(editing&&richDirty){richSetStatus('A newer project update is available. Save or copy your draft before refreshing.','warning');return;}if(editing){const remote=project(richDoc.projectId)?.data.docs?.find(d=>d.id===richDoc.id);if(remote){richDoc={...remote,projectId:richDoc.projectId,baseUpdatedAt:remote.updatedAt};}}if(renderAfter)render();};
-function openRichDoc(id){const p=project(),existing=(p.data.docs||[]).find(d=>d.id===id);richDoc={id:existing?.id||uid(),projectId:p.id,title:existing?.title||'',html:richInitialHtml(existing),baseUpdatedAt:existing?.updatedAt||null};richDirty=false;state.view='docs';render();}
-function scheduleRichSave(){richDirty=true;richSetStatus('Saving…');clearTimeout(richSaveTimer);richSaveTimer=setTimeout(()=>richSaveDocument(true),900);}
-async function richSaveDocument(silent=false){if(!richDoc||richSaveInFlight)return;const p=richProject();if(!p)return;const title=String($('#rich-doc-title')?.value||richDoc.title||'').trim();if(!title){richSetStatus('Add a title before saving.','warning');return;}const html=richCurrentContent();if(html.length>19000){richSetStatus('This document is too long to save.','warning');return;}const next={id:richDoc.id,title,html,blocks:[{id:'rich-content',type:'paragraph',text:html}],updatedAt:new Date().toISOString()};const current=(p.data.docs||[]).find(d=>d.id===next.id);if((current?.updatedAt||null)!==richDoc.baseUpdatedAt){richSetStatus('This document changed elsewhere. Copy your text before reopening it.','warning');return;}const data=structuredClone(p.data);data.docs=data.docs||[];const i=data.docs.findIndex(d=>d.id===next.id);if(i<0){if(data.docs.length>=100){richSetStatus('This project has reached its document limit.','warning');return;}data.docs.push(next);}else data.docs[i]=next;richSaveInFlight=true;try{if(state.demo){p.data=data;persist();}else{const result=await api('project/save',{id:p.id,data,revision:p.revision});p.data=data;p.revision=result.revision;}richDoc={...next,projectId:p.id,baseUpdatedAt:next.updatedAt};richDirty=false;richSetStatus('Saved');if(!silent)toast('Document saved for project members.');}catch(error){richSetStatus(error.message||'Could not save changes.','warning');}finally{richSaveInFlight=false;}}
+loadCloud=async function(renderAfter=true){
+  const editing=state.view==='docs'&&richDoc;
+  await orbitBaseLoadCloud(false);
+  if(editing&&richDirty){richSetStatus('A newer project update is available. Save or copy your draft before refreshing.','warning');return;}
+  if(editing){
+    const remote=project(richDoc.projectId)?.data.docs?.find(d=>d.id===richDoc.id);
+    if(remote){
+      const tabs=richTabsFrom(remote),active=tabs.some(tab=>tab.id===richDoc.activeTabId)?richDoc.activeTabId:tabs[0]?.id;
+      richDoc={...remote,tabs,activeTabId:active,projectId:richDoc.projectId,baseUpdatedAt:remote.updatedAt};
+    }
+  }
+  if(renderAfter)render();
+};
+function openRichDoc(id){
+  const p=project(),existing=(p.data.docs||[]).find(d=>d.id===id),docId=existing?.id||uid(),tabs=richTabsFrom(existing);
+  let activeTabId=tabs[0]?.id;
+  try{const saved=localStorage.getItem(richTabPreferenceKey(p.id,docId));if(tabs.some(tab=>tab.id===saved))activeTabId=saved;}catch{}
+  richDoc={id:docId,projectId:p.id,title:existing?.title||'',tabs,activeTabId,baseUpdatedAt:existing?.updatedAt||null};
+  richCollapsedTabs=new Set(tabs.filter(tab=>tab.id!==activeTabId).map(tab=>tab.id));
+  richCollapsedHeadings=new Set();
+  richEditVersion=0;
+  richDirty=false;
+  richRememberTab();
+  state.view='docs';
+  render();
+}
+function scheduleRichSave(){
+  richSyncActiveTab();
+  richDirty=true;
+  richEditVersion++;
+  richSetStatus('Saving…');
+  richRefreshTabList();
+  clearTimeout(richSaveTimer);
+  richSaveTimer=setTimeout(()=>richSaveDocument(true),900);
+}
+async function richFlushActiveTab(){
+  richSyncActiveTab();
+  clearTimeout(richSaveTimer);
+  if(richDirty)await richSaveDocument(true);
+}
+async function richSelectTab(id){
+  if(!richDoc||!richDoc.tabs.some(tab=>tab.id===id)||id===richDoc.activeTabId)return;
+  await richFlushActiveTab();
+  richCollapsedTabs.delete(id);
+  richDoc.activeTabId=id;
+  richRememberTab();
+  render();
+}
+async function richAddTab(){
+  if(!richDoc)return;
+  if(richDoc.tabs.length>=20){toast('A document can contain up to 20 tabs.');return;}
+  const name=prompt('Name this tab','Tab '+(richDoc.tabs.length+1));
+  if(name===null)return;
+  const title=name.trim().slice(0,80);
+  if(!title){toast('Give the tab a name.');return;}
+  const previous=richDoc.activeTabId;
+  await richFlushActiveTab();
+  const tab={id:uid(),title,html:'<p><br></p>'};
+  richDoc.tabs.push(tab);
+  if(previous)richCollapsedTabs.add(previous);
+  richCollapsedTabs.delete(tab.id);
+  richDoc.activeTabId=tab.id;
+  richRememberTab();
+  render();
+  scheduleRichSave();
+}
+function richRenameTab(id){
+  const tab=richDoc?.tabs.find(item=>item.id===id);
+  if(!tab)return;
+  const name=prompt('Rename tab',tab.title);
+  if(name===null)return;
+  const title=name.trim().slice(0,80);
+  if(!title){toast('Give the tab a name.');return;}
+  tab.title=title;
+  scheduleRichSave();
+}
+function richDeleteTab(id){
+  if(!richDoc||richDoc.tabs.length<=1){toast('A document must keep at least one tab.');return;}
+  const tab=richDoc.tabs.find(item=>item.id===id);
+  if(!tab||!confirm('Delete the tab “'+tab.title+'”? This cannot be undone.'))return;
+  richSyncActiveTab();
+  const index=richDoc.tabs.findIndex(item=>item.id===id);
+  richDoc.tabs.splice(index,1);
+  richCollapsedTabs.delete(id);
+  [...richCollapsedHeadings].filter(key=>key.startsWith(id+':')).forEach(key=>richCollapsedHeadings.delete(key));
+  if(richDoc.activeTabId===id){
+    richDoc.activeTabId=richDoc.tabs[Math.min(index,richDoc.tabs.length-1)].id;
+    richRememberTab();
+    render();
+  }
+  scheduleRichSave();
+}
+function richToggleTabOutline(id){
+  richSyncActiveTab();
+  if(richCollapsedTabs.has(id))richCollapsedTabs.delete(id);else richCollapsedTabs.add(id);
+  richRefreshTabList();
+}
+function richToggleHeading(tabId,index){
+  richSyncActiveTab();
+  const key=tabId+':'+index;
+  if(richCollapsedHeadings.has(key))richCollapsedHeadings.delete(key);else richCollapsedHeadings.add(key);
+  richRefreshTabList();
+}
+async function richJumpToHeading(tabId,index){
+  if(tabId!==richDoc?.activeTabId)await richSelectTab(tabId);
+  const heading=$('#rich-doc-canvas')?.querySelectorAll('h1,h2,h3,h4')[Number(index)];
+  if(!heading)return;
+  heading.scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'start'});
+  const canvas=$('#rich-doc-canvas'),selection=window.getSelection(),range=document.createRange();
+  range.selectNodeContents(heading);
+  range.collapse(true);
+  canvas?.focus({preventScroll:true});
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+}
+async function richSaveDocument(silent=false){
+  if(!richDoc)return;
+  if(richSaveInFlight){
+    await richSavePromise;
+    if(richDirty)return richSaveDocument(silent);
+    return;
+  }
+  const p=richProject();
+  if(!p)return;
+  richSyncActiveTab();
+  const title=String($('#rich-doc-title')?.value||richDoc.title||'').trim();
+  if(!title){richSetStatus('Add a title before saving.','warning');return;}
+  if(!richDoc.tabs.length||richDoc.tabs.length>20){richSetStatus('This document must have between 1 and 20 tabs.','warning');return;}
+  const tabs=richDoc.tabs.map(tab=>({...tab,title:String(tab.title||'').trim().slice(0,80),html:richSanitize(tab.html||'<p><br></p>')}));
+  if(tabs.some(tab=>!tab.title)){richSetStatus('Every tab needs a name.','warning');return;}
+  if(tabs.some(tab=>tab.html.length>19000)){richSetStatus('A tab is too long to save. Keep each tab under 19,000 characters.','warning');return;}
+  const activeTabId=richDoc.activeTabId||tabs[0].id,activeTab=tabs.find(tab=>tab.id===activeTabId)||tabs[0],html=activeTab.html;
+  const next={id:richDoc.id,title,tabs,html,blocks:[{id:'rich-content',type:'paragraph',text:html}],updatedAt:new Date().toISOString()};
+  const current=(p.data.docs||[]).find(d=>d.id===next.id);
+  if((current?.updatedAt||null)!==richDoc.baseUpdatedAt){richSetStatus('This document changed elsewhere. Copy your text before reopening it.','warning');return;}
+  const data=structuredClone(p.data);
+  data.docs=data.docs||[];
+  const i=data.docs.findIndex(d=>d.id===next.id);
+  if(i<0){if(data.docs.length>=100){richSetStatus('This project has reached its document limit.','warning');return;}data.docs.push(next);}else data.docs[i]=next;
+  const editVersion=richEditVersion;
+  richSaveInFlight=true;
+  richSavePromise=(async()=>{
+    try{
+      if(state.demo){p.data=data;persist();}
+      else{const result=await api('project/save',{id:p.id,data,revision:p.revision});p.data=data;p.revision=result.revision;}
+      richDoc={...next,projectId:p.id,activeTabId,baseUpdatedAt:next.updatedAt};
+      if(richEditVersion===editVersion)richDirty=false;
+      richSetStatus(richDirty?'Saving…':'Saved');
+      if(!silent)toast('Document saved for project members.');
+      if(richDirty){clearTimeout(richSaveTimer);richSaveTimer=setTimeout(()=>richSaveDocument(true),250);}
+    }catch(error){richSetStatus(error.message||'Could not save changes.','warning');}
+    finally{richSaveInFlight=false;richSavePromise=null;}
+  })();
+  await richSavePromise;
+}
 async function deleteRichDocument(){if(!richDoc||!confirm('Delete this document? This cannot be undone.'))return;const p=richProject(),data=structuredClone(p.data);data.docs=(data.docs||[]).filter(d=>d.id!==richDoc.id);try{if(state.demo){p.data=data;persist();}else{const result=await api('project/save',{id:p.id,data,revision:p.revision});p.data=data;p.revision=result.revision;}richDoc=null;render();toast('Document deleted.');}catch(error){toast(error.message);}}
-document.addEventListener('click',async event=>{const target=event.target.closest('[data-action]');if(!target)return;const action=target.dataset.action;if(!['docs','doc-new','doc-open','doc-back','rich-save','doc-delete'].includes(action))return;event.preventDefault();event.stopImmediatePropagation();try{if(action==='docs'){richDoc=null;state.view='docs';render();}if(action==='doc-new')openRichDoc();if(action==='doc-open')openRichDoc(target.dataset.id);if(action==='doc-back'){if(richDirty&& !confirm('You have unsaved changes. Leave this document?'))return;richDoc=null;state.view='docs';render();}if(action==='rich-save')await richSaveDocument();if(action==='doc-delete')await deleteRichDocument();}catch(error){toast(error.message);}},true);
+document.addEventListener('click',async event=>{
+  const target=event.target.closest('[data-action]');
+  if(!target)return;
+  const action=target.dataset.action,tabId=target.dataset.id,headingTabId=target.dataset.tabId||tabId;
+  const richActions=['docs','doc-new','doc-open','doc-back','rich-save','doc-delete','doc-tab-select','doc-tab-add','doc-tab-rename','doc-tab-delete','doc-tab-outline-toggle','doc-outline-toggle','doc-outline-jump'];
+  if(!richActions.includes(action))return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  try{
+    if(action==='docs'){richDoc=null;state.view='docs';render();}
+    if(action==='doc-new')openRichDoc();
+    if(action==='doc-open')openRichDoc(target.dataset.id);
+    if(action==='doc-back'){
+      if(richDirty&&!confirm('You have unsaved changes. Leave this document?'))return;
+      richDoc=null;state.view='docs';render();
+    }
+    if(action==='rich-save'){clearTimeout(richSaveTimer);await richSaveDocument();}
+    if(action==='doc-delete')await deleteRichDocument();
+    if(action==='doc-tab-select')await richSelectTab(tabId);
+    if(action==='doc-tab-add')await richAddTab();
+    if(action==='doc-tab-rename')richRenameTab(tabId);
+    if(action==='doc-tab-delete')richDeleteTab(tabId);
+    if(action==='doc-tab-outline-toggle')richToggleTabOutline(tabId);
+    if(action==='doc-outline-toggle')richToggleHeading(headingTabId,Number(target.dataset.headingIndex));
+    if(action==='doc-outline-jump')await richJumpToHeading(headingTabId,Number(target.dataset.headingIndex));
+  }catch(error){toast(error.message);}
+},true);
 document.addEventListener('input',event=>{if(event.target.id==='rich-doc-canvas'||event.target.id==='rich-doc-title')scheduleRichSave();});
 document.addEventListener('change',event=>{if(event.target.id==='rich-block-format'){document.execCommand('formatBlock',false,event.target.value);scheduleRichSave();}if(event.target.id==='rich-colour'){document.execCommand('foreColor',false,event.target.value);scheduleRichSave();}});
 document.addEventListener('click',event=>{const tool=event.target.closest('[data-rich-command]');if(!tool)return;event.preventDefault();const command=tool.dataset.richCommand,canvas=$('#rich-doc-canvas');canvas?.focus();if(command==='createLink'){const url=prompt('Paste a web link (https://…)');if(url&&/^(https?:|mailto:)/i.test(url))document.execCommand('createLink',false,url);else if(url)toast('Use a link starting with https://, http://, or mailto:.');}else if(command==='checklist'){document.execCommand('insertHTML',false,'<ul class="rich-checklist" data-checklist="true"><li>New checklist item</li></ul>');}else document.execCommand(command,false,null);scheduleRichSave();});
